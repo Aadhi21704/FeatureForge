@@ -20,6 +20,10 @@ section = st.sidebar.radio("Select Section", ["Home", "EDA", "Preprocessing", "S
                                                "Train Model", "Evaluate Model", "Prediction",
                                                "Save/Load Model", "Feature Importance", "Download Results"])
 
+@st.cache_data
+def load_data(uploaded_file):
+    return pd.read_csv(uploaded_file)
+
 # 1. Home Page and File Upload
 if section == "Home":
     st.title("Welcome to FeatureForge 🚀")
@@ -38,7 +42,7 @@ if section == "Home":
     uploaded_file = st.file_uploader("Upload a CSV file", type="csv")
 
     if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
+        df = load_data(uploaded_file)
         st.session_state.df = df  # Store the uploaded dataframe in session state
         st.write("Preview of the uploaded dataset:")
         st.dataframe(df)
@@ -63,22 +67,28 @@ if section == "EDA":
             fig, ax = plt.subplots(figsize=(11,5))
             sns.heatmap(df.corr(), annot=True, cmap='coolwarm', ax=ax)
             st.pyplot(fig)
-
-        # Pair Plot (for small datasets)
-        if st.checkbox("Show Pair Plot (for numerical columns only)"):
-            st.subheader("Pair Plot")
-            sns.pairplot(df.select_dtypes(include=['int64', 'float64']),height=2.5)
-            st.pyplot()
-
-        # Distribution Plots
-        st.subheader("Distribution of Each Feature")
-        for column in df.select_dtypes(include=['int64', 'float64']).columns:
-            st.write(f"Distribution for {column}")
-            fig, ax = plt.subplots()
-            sns.histplot(df[column], kde=True, ax=ax)
-            st.pyplot(fig)
     else:
         st.warning("Please upload a dataset first.")
+
+@st.cache_data
+def preprocess_data(X):
+    numeric_features = X.select_dtypes(include=['int64', 'float64']).columns
+    categorical_features = X.select_dtypes(include=['object']).columns
+
+    numeric_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='mean')),
+        ('scaler', StandardScaler())])
+
+    categorical_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('onehot', OneHotEncoder(handle_unknown='ignore'))])
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, numeric_features),
+            ('cat', categorical_transformer, categorical_features)])
+
+    return preprocessor.fit_transform(X)
 
 # 3. Data Preprocessing
 if section == "Preprocessing":
@@ -87,32 +97,12 @@ if section == "Preprocessing":
         target_variable = st.selectbox("Select the Target Variable", options=df.columns)
 
         if st.button("Preprocess Data"):
-            # Separate features and target
             X = df.drop(columns=[target_variable])
             y = df[target_variable]
             st.session_state.X = X
             st.session_state.y = y
             
-            # Identify numerical and categorical features
-            numeric_features = X.select_dtypes(include=['int64', 'float64']).columns
-            categorical_features = X.select_dtypes(include=['object']).columns
-
-            # Create preprocessing pipeline
-            numeric_transformer = Pipeline(steps=[
-                ('imputer', SimpleImputer(strategy='mean')),
-                ('scaler', StandardScaler())])
-
-            categorical_transformer = Pipeline(steps=[
-                ('imputer', SimpleImputer(strategy='most_frequent')),
-                ('onehot', OneHotEncoder(handle_unknown='ignore'))])
-
-            preprocessor = ColumnTransformer(
-                transformers=[
-                    ('num', numeric_transformer, numeric_features),
-                    ('cat', categorical_transformer, categorical_features)])
-
-            # Apply preprocessing
-            X_preprocessed = preprocessor.fit_transform(X)
+            X_preprocessed = preprocess_data(X)
             st.session_state.X_preprocessed = X_preprocessed
 
             st.success("Data preprocessing completed!")
@@ -121,11 +111,14 @@ if section == "Preprocessing":
     else:
         st.warning("Please upload a dataset first.")
 
+@st.cache_data
+def split_data(X, y):
+    return train_test_split(X, y, test_size=0.3, random_state=42)
+
 # 4. Data Splitting
 if section == "Split Data":
     if 'X' in st.session_state and 'y' in st.session_state:
-        X, y = st.session_state.X, st.session_state.y
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+        X_train, X_test, y_train, y_test = split_data(st.session_state.X, st.session_state.y)
         st.session_state.X_train = X_train
         st.session_state.X_test = X_test
         st.session_state.y_train = y_train
@@ -136,16 +129,6 @@ if section == "Split Data":
         st.write(f"X_test shape: {X_test.shape}")
         st.write(f"y_train shape: {y_train.shape}")
         st.write(f"y_test shape: {y_test.shape}")
-
-        # Visualize Data Distribution
-        fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-        sns.histplot(y_train, ax=ax[0], bins=30, kde=True)
-        ax[0].set_title("Distribution of Training Target Variable")
-        sns.histplot(y_test, ax=ax[1], bins=30, kde=True)
-        ax[1].set_title("Distribution of Test Target Variable")
-        st.pyplot(fig)
-
-        st.success("Data split completed!")
     else:
         st.warning("Please preprocess the data first.")
 
